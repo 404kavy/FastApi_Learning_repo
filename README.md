@@ -135,3 +135,260 @@ class Patient(BaseModel):
 # Why? Defines the exact structure of a Patient. 
 # 'Annotated' and 'Field' add metadata and validation (gt=0 means greater than 0).
 # 'computed_field' and '@property' automatically calculate BMI and Verdict without storing them.
+
+
+
+# 4. UPDATE MODEL
+class PatientUpdate(BaseModel):
+    name: Annotated[Optional[str], Field(default=None)]
+    city: Annotated[Optional[str], Field(default=None)]
+    # ... other fields are Optional
+
+# Why? When updating, we don't want to send ALL fields. Optional allows partial updates.
+
+
+# 5. HELPER FUNCTIONS
+def load_data():
+    with open('patients.json', 'r') as f:
+        data = json.load(f)
+    return data
+
+def save_data(data):
+    with open('patients.json', 'w') as f:
+        json.dump(data, f)
+
+# Why? Encapsulates file I/O so we don't repeat open/read/write code in every endpoint.
+
+
+# 6. ENDPOINTS
+@app.get("/")
+def hello():
+    return {'message': 'Patient Management System API'}
+
+# Why? A simple root endpoint to verify the server is running.
+
+@app.get("/patient/{patient_id}")
+def view_patient(patient_id: str = Path(..., description='ID of the patient', example='P001')):
+    data = load_data()
+    if patient_id not in data:
+        raise HTTPException(status_code=404, detail='Patient not found')
+    return data[patient_id]
+
+# Why? Fetches a single patient. Path(...) extracts 'P001' from the URL. 
+# If not found, HTTPException stops execution and returns a 404 JSON error.
+
+
+[Client / Swagger UI]
+       │
+       │ 1. Sends HTTP Request (e.g., GET /patient/P001)
+       ▼
+[Uvicorn Server]
+       │
+       │ 2. Receives request, passes to FastAPI
+       ▼
+[FastAPI Router]
+       │
+       │ 3. Matches URL to @app.get("/patient/{patient_id}")
+       ▼
+[Path Parameter Extraction]
+       │
+       │ 4. Extracts "P001" and validates it's a string
+       ▼
+[Function Execution]
+       │
+       │ 5. Calls load_data() -> reads patients.json
+       ▼
+[Business Logic]
+       │
+       │ 6. Checks if "P001" exists in dictionary
+       ▼
+[Response Generation]
+       │
+       │ 7. Returns dictionary -> FastAPI converts to JSON
+       ▼
+[Client]
+       │
+       │ 8. Receives 200 OK with Patient Data
+
+
+
+Swagger UI 
+   ↓ (Sends JSON Body)
+FastAPI 
+   ↓ (Parses Body)
+Pydantic Model (Patient) 
+   ↓ (Validates types, calculates BMI/Verdict)
+model_dump(exclude={'id'}) 
+   ↓ (Converts to Dict, removes ID to prevent spoofing)
+Dictionary 
+   ↓ (Adds ID: data[patient_id] = dict)
+patients.json (via save_data)
+
+
+
+Swagger UI 
+   ↓ (Sends Query Params: ?sort_by=bmi&order=desc)
+FastAPI 
+   ↓ (Extracts Query params)
+load_data() 
+   ↓ (Reads JSON to Dict)
+sorted() function 
+   ↓ (Sorts dict values using lambda: x.get('bmi'))
+JSONResponse 
+   ↓ (Returns sorted list)
+Client
+
+
+
+
+Swagger UI 
+   ↓ (Sends Query Params: ?sort_by=bmi&order=desc)
+FastAPI 
+   ↓ (Extracts Query params)
+load_data() 
+   ↓ (Reads JSON to Dict)
+sorted() function 
+   ↓ (Sorts dict values using lambda: x.get('bmi'))
+JSONResponse 
+   ↓ (Returns sorted list)
+Client
+
+
+
+
+Why use BaseModel? It enforces data integrity at the boundary of your application.
+Key Pydantic Features Used
+Annotated & Field: Allows adding metadata (descriptions, examples) and constraints (gt=0) without cluttering the type hint.
+Literal: Restricts a string to a specific set of values (e.g., 'male', 'female'). Acts like an Enum.
+Optional: Means the field can be None. Crucial for Update models.
+@computed_field & @property: Calculates values on the fly. BMI is never stored in the JSON; it's always calculated from the latest height/weight.
+model_dump(): Converts the Pydantic object into a standard Python dictionary.
+exclude={'id'}: Prevents the client from overwriting the primary key.
+exclude_unset=True: Only includes fields that were explicitly provided (vital for PATCH/PUT updates).
+
+
+8. FastAPI Deep Dive
+Why is FastAPI so fast?
+Starlette: It's built on Starlette for the asynchronous web handling.
+Pydantic: Uses Rust-based Pydantic core for lightning-fast data validation.
+Type Hints: Leverages Python's native type hints, avoiding runtime reflection overhead.
+HTTP Methods Explained
+@app.get: Retrieve data. Safe, idempotent.
+@app.post: Create new data. Not idempotent (calling twice creates two records).
+@app.put: Replace existing data entirely.
+@app.delete: Remove data.
+JSONResponse vs Dict
+FastAPI automatically converts returned Python dictionaries into JSON. However, if we need to set a custom status code (like 201 Created), we must explicitly return a JSONResponse.
+python
+return JSONResponse(status_code=201, content={'message': 'created'})
+
+
+
+9. Every Parameter Explanation
+Parameter
+Used In
+Purpose
+Example
+... (Ellipsis)
+Field(...)
+Marks a field as required.
+Field(..., description="Name")
+default=None
+Field()
+Makes a field optional.
+Field(default=None)
+gt / lt
+Field()
+Greater than / Less than validation.
+Field(..., gt=0)
+description
+Field() / Path()
+Adds text to Swagger UI docs.
+description="Patient ID"
+example
+Field() / Path()
+Shows a sample value in Swagger.
+example="P001"
+exclude
+model_dump()
+Omits keys from the output dict.
+exclude={'id'}
+exclude_unset
+model_dump()
+Only includes fields explicitly set.
+exclude_unset=True
+status_code
+HTTPException
+The HTTP error code to return.
+status_code=404
+detail
+HTTPException
+The error message body.
+detail="Not found"
+indent
+json.dump()
+Pretty-prints JSON with spaces.
+indent=4
+10. Functions Used
+json.load(f): Reads a JSON file and converts it into a Python dictionary.
+json.dump(data, f): Converts a Python dictionary into JSON and writes it to a file.
+open('file.json', 'r'): Opens a file in read mode. Using with ensures it closes automatically.
+round(number, 2): Rounds a float to 2 decimal places (used for BMI).
+@property: A Python decorator that turns a method into a "getter" for an attribute.
+.items(): Returns key-value pairs from a dictionary, used when iterating over update data.
+sorted(): Python's built-in sorting function. We use a lambda to tell it which dictionary key to sort by.
+11. Why Things Are Done (The "Why")
+Why model_dump(exclude={'id'})?
+Security. If we allow the client to send an id in the POST body, they could spoof another patient's ID. We generate/assign the ID on the server side.
+Why computed_field for BMI?
+Data Integrity. If we store BMI, what happens if the user updates their weight? The stored BMI becomes outdated. Calculating it on the fly ensures it's always accurate.
+Why JSON instead of a Database?
+Simplicity. For learning FastAPI, setting up PostgreSQL adds too much friction. JSON allows us to focus purely on API logic and Pydantic validation.
+Why PatientUpdate class?
+Flexibility. A full Patient model requires all fields. An update should only require the fields you want to change. Optional fields make this possible.
+12. Best Practices
+Naming Conventions
+Use snake_case for Python functions and variables (load_data, patient_id).
+Use PascalCase for Classes (Patient, PatientUpdate).
+Code Improvements
+Error Handling: Always catch FileNotFoundError when reading JSON files in case the file is deleted.
+Async: Use async def for endpoints to allow concurrent request handling.
+Security & Production
+Never trust client input. Pydantic handles this, but always validate business logic (e.g., checking if a patient already exists before creating).
+Environment Variables: Never hardcode file paths. Use os.getenv() or pydantic-settings.
+13. API Documentation
+Method
+Endpoint
+Purpose
+Request Body / Params
+Response
+GET
+/
+Health check
+None
+{"message": "..."}
+GET
+/patient/{id}
+Get one patient
+Path: id
+Patient Object
+GET
+/sort
+Sort all patients
+Query: sort_by, order
+List of Patients
+POST
+/create
+Create patient
+Body: Patient
+201 Created
+PUT
+/edit/{id}
+Update patient
+Path: id, Body: PatientUpdate
+200 OK
+DELETE
+/delete/{id}
+Delete patient
+Path: id
+200 OK
